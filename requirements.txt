@@ -1,12 +1,14 @@
-# requirements.txt for Cosmic-Voyage
-
 python-telegram-bot==20.7
-requests
 aiohttp
-urllib3
-pytz
-numpy
-pandas
-python-dotenv
+asyncio
+Flask
 gunicorn
-flask
+requests
+urllib3
+python-dotenv
+pytz
+pandas
+numpy
+Pillow
+rich
+colorama
