@@ -11,12 +11,14 @@ SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "-1002707382739"))
 MIN_PLAYERS = 4
 MAX_PLAYERS = 21
 BASE_LOBBY_TIMER = 120
-ACTION_TIMER = 45
+ACTION_TIMER = 90 
 TOTAL_DAYS = 13
-POTION_DAY = 7
-COMMAND_COOLDOWN = 3
+POTION_DAY = 9
+COMMAND_COOLDOWN = 2
 DIVINE_INTERVENTION_PROB = 0.5
 RANDOM_EVENT_CHANCE = 0.25 
+VOTING_START_DAY = 2
+VOTING_TIMER = 45
 
 # HP Values
 INITIAL_SHIP_HP = 100
@@ -24,6 +26,34 @@ INITIAL_PLAYER_HP = 100
 HEAL_SELF_AMOUNT = 15
 REPAIR_SHIP_AMOUNT = 11
 DIVINE_HEAL_AMOUNT = 15
+
+ACHIEVEMENTS = {
+    'master_healer': {'desc': 'Heal 500 HP across all games', 'threshold': 500, 'stat': 'total_heals'},
+    'betrayer_king': {'desc': 'Win 3 games as Betrayer or Epic Monster', 'threshold': 3, 'condition': lambda player, stats: player.role in [Role.BETRAYER, Role.EPIC_MONSTER] and stats['wins'] >= 3},
+    'survivor': {'desc': 'Survive to the end in 10 games', 'threshold': 10, 'stat': 'games_survived'},
+    'coin_hoarder': {'desc': 'Earn 1000 coins lifetime', 'threshold': 1000, 'stat': 'total_coins'},
+    'ship_savior': {'desc': 'Repair 300 ship HP across all games', 'threshold': 300, 'stat': 'total_heals'},  # Assuming ship repairs count as heals
+    'monster_slayer': {'desc': 'Eliminate the Epic Monster 3 times', 'threshold': 3, 'condition': lambda player, stats: stats['total_kills'] >= 3 and any(p.role == Role.EPIC_MONSTER for p in game.players.values() if p.hp <= 0)},
+    'potion_protector': {'desc': 'Deliver the potion as Potion Bearer 2 times', 'threshold': 2, 'stat': 'potions_delivered'},
+    'shadow_master': {'desc': 'Perform 50 sabotages', 'threshold': 50, 'stat': 'sabotages_performed'},
+    'relic_hunter': {'desc': 'Find 10 relics as Explorer', 'threshold': 10, 'stat': 'relics_found'},
+    'captains_glory': {'desc': 'Use rally 10 times as Captain', 'threshold': 10, 'stat': 'rallies_used'},
+    'oracles_vision': {'desc': 'Reveal the Betrayer/Epic Monster 5 times', 'threshold': 5, 'stat': 'monsters_revealed'},
+    'dragon_tamer': {'desc': 'Protect allies with Dragon Rider 10 times', 'threshold': 10, 'condition': lambda player, stats: player.role == Role.DRAGON_RIDER and stats['games_played'] >= 10},  # Track via actions
+    'guardian_angel': {'desc': 'Protect Potion Bearer from 5 attacks', 'threshold': 5, 'condition': lambda player, stats: player.role == Role.ANGEL_GUARDIAN and stats['games_played'] >= 5},  # Track via protect actions
+    'cosmic_veteran': {'desc': 'Play 50 games', 'threshold': 50, 'stat': 'games_played'},
+    'chaos_bringer': {'desc': 'Deal 1000 damage as a Shadow role', 'threshold': 1000, 'stat': 'total_damage', 'condition': lambda player, stats: player.role in [Role.BETRAYER, Role.EPIC_MONSTER, Role.SHADOW_SABOTEUR, Role.DEVIL_HUNTER]},
+    'vote_master': {'desc': 'Cast 100 votes', 'threshold': 100, 'stat': 'votes_cast'},
+    'divine_interventionist': {'desc': 'Trigger divine intervention 5 times while alive', 'threshold': 5, 'condition': lambda player, stats: player.is_alive and random.random() < DIVINE_INTERVENTION_PROB},
+    'black_market_mogul': {'desc': 'Purchase 10 Black Market items', 'threshold': 10, 'condition': lambda player, stats: sum(1 for item in SHOP_ITEMS.values() if item.get('market', False))},
+    'ship_upgrader': {'desc': 'Contribute to 5 ship upgrades', 'threshold': 5, 'condition': lambda player, stats: sum(game.upgrade_contribution.values()) >= 5},
+    'team_player': {'desc': 'Win 10 games as a Light-side role', 'threshold': 10, 'condition': lambda player, stats: player.role not in [Role.BETRAYER, Role.EPIC_MONSTER, Role.SHADOW_SABOTEUR, Role.DEVIL_HUNTER] and stats['wins'] >= 10},
+    'lone_wolf': {'desc': 'Survive as the last player 3 times', 'threshold': 3, 'condition': lambda player, stats: player.is_alive and len([p for p in game.players.values() if p.is_alive]) == 1},
+    'quick_thinker': {'desc': 'Complete actions in 10s in 20 phases', 'threshold': 20, 'stat': 'game_action_time'},
+    'underdog': {'desc': 'Win with fewer than 3 team members left', 'threshold': 1, 'condition': lambda player, stats: player.game_underdog_win},
+    'flawless_victory': {'desc': 'Win without taking damage', 'threshold': 1, 'condition': lambda player, stats: player.game_flawless and stats['wins'] > 0},
+    'cosmic_legend': {'desc': 'Achieve 15 different achievements', 'threshold': 15, 'condition': lambda player, stats: len(get_achievements(player.user_id)) >= 15}
+}
 
 # GIF URLs
 GIFS = {
@@ -98,67 +128,61 @@ SHOP_ITEMS = {
 
 # Help texts
 HELP_TEXTS = {
-    "roles": "🎭 **ROLES GUIDE** 🎭\n\n"
-            "✨ **HEROES** ✨\n"
-            "• 🎖 **Captain:** Leads team, reduces ship damage by 20%, can repair ship\n"
-            "• 🩹 **Healer:** Heals players (+20 HP) and repairs ship (+15 HP)\n"
-            "• 🔮 **Oracle:** Detects hazards and monster attacks\n"
-            "• 🐉 **Dragon Rider:** Reduces monster damage by 50%\n"
-            "• 👼 **Angel Guardian:** Protects Potion Bearer from attacks\n"
-            "• 🪐 **Explorer:** Finds relics to boost abilities\n"
-            "• ⚡ **Potion Bearer:** Carries and delivers the cosmic potion\n\n"
-            "👹 **VILLAINS** 👹\n"
-            "• 🗡 **Betrayer:** Sabotages ship, transforms into Epic Monster\n"
-            "• 👹 **Epic Monster:** Attacks ship, players, and potion\n"
-            "• 👤 **Shadow Saboteur:** Blocks one player's action daily\n"
-            "• 😈 **Devil Hunter:** Boosts monster's attack once per game",
+    "roles": "🎭 **Role Overview** 🎭\n\n"
+            "✨ **Heroes of Light** ✨\n"
+            "• 🎖️ **Captain:** Guides crew, cuts ship damage 20%, repairs hull.\n"
+            "• 🩹 **Healer:** Mends allies (+20 HP), fixes ship (+15 HP).\n"
+            "• 🔮 **Oracle:** Foresees dangers and foe strikes.\n"
+            "• 🐉 **Dragon Rider:** Halves monster assaults.\n"
+            "• 👼 **Angel Guardian:** Shields potion carrier.\n"
+            "• 🪐 **Explorer:** Uncovers relics for boosts.\n"
+            "• ⚡ **Potion Bearer:** Holds and delivers the key artifact.\n\n"
+            "👹 **Shadows of Chaos** 👹\n"
+            "• 🗡️ **Betrayer:** Undermines ship, evolves into Epic Monster.\n"
+            "• 👹 **Epic Monster:** Ravages ship and crew.\n"
+            "• 👤 **Shadow Saboteur:** Thwarts one action daily.\n"
+            "• 😈 **Devil Hunter:** Amplifies monster power once.",
     
-    "flow": "📅 **GAME FLOW** 📅\n\n"
-           "🌅 **Days 1-3: Healing Phase**\n"
-           "• Calm journey, prepare for challenges\n"
-           "• Focus on healing and gathering resources\n\n"
-           "🚢 **Days 4-9: Cosmic Voyage**\n"
-           "• Hazards and adventures\n"
-           "• Monster may sabotage secretly\n\n"
-           "⚡ **Day 10: Potion Quest**\n"
-           "• Cosmic Potion appears\n"
-           "• Betrayer transforms into Epic Monster\n\n"
-           "⚔️ **Days 11-12: Monster Showdown**\n"
-           "• Epic Monster reveals itself\n"
-           "• Intense battles and strategies\n\n"
-           "🏆 **Day 13: Final Delivery**\n"
-           "• Last chance to deliver potion\n"
-           "• Victory or defeat decided!",
+    "flow": "📅 **Journey Phases** 📅\n\n"
+           "🌅 **Days 1-3: Recovery** \n"
+           "Calm start – heal wounds, stock up.\n\n"
+           "🚢 **Days 4-9: Deep Space** \n"
+           "Face hazards; shadows lurk.\n\n"
+           "⚡ **Day 10: Artifact Awakens** \n"
+           "Potion emerges; betrayer transforms.\n\n"
+           "⚔️ **Days 11-12: Clash Peak** \n"
+           "Monster unleashes; strategize fiercely.\n\n"
+           "🏆 **Day 13: Destiny** \n"
+           "Final push – deliver or doom!",
     
-    "objective": "🎯 **OBJECTIVES** 🎯\n\n"
-                "⭐ **TEAM GOAL:**\n"
-                "Deliver the Cosmic Potion by Day 13\n"
-                "• Protect the Potion Bearer\n"
-                "• Keep ship HP above 0\n"
-                "• Survive monster attacks\n\n"
-                "👹 **MONSTER GOAL:**\n"
-                "Destroy the ship or eliminate all heroes\n"
-                "• Sabotage the ship\n"
-                "• Attack players\n"
-                "• Prevent potion delivery\n\n"
-                "⚡ **Daily Actions:**\n"
-                "Each day you choose actions via DM\n"
-                "20 seconds to decide!",
+    "objective": "🎯 **Core Missions** 🎯\n\n"
+                "⭐ **Light's Quest:** \n"
+                "Secure potion delivery by Day 13.\n"
+                "- Guard the bearer\n"
+                "- Maintain ship integrity\n"
+                "- Endure assaults\n\n"
+                "👹 **Shadow's Scheme:** \n"
+                "Ruin ship or vanquish heroes.\n"
+                "- Weaken hull\n"
+                "- Strike foes\n"
+                "- Block delivery\n\n"
+                "⚡ **Daily Moves:** \n"
+                "Select via DM – 20s to act wisely!",
     
-    "tips": "💡 **PRO TIPS** 💡\n\n"
-           "🎮 **For New Players:**\n"
-           "• Keep your role secret from others\n"
-           "• Vote wisely during elimination\n"
-           "• Use resources strategically\n"
-           "• Coordinate with your team\n\n"
-           "⚡ **Advanced Strategies:**\n"
-           "• Heal collateral damage within 4 days\n"
-           "• Use relics and shop items wisely\n"
-           "• Protect the Potion Bearer at all costs\n"
-           "• Monitor ship HP carefully\n\n"
-           "🏆 **Win Probability:**\n"
-           "Team: ~45% | Monster: ~55%\n\n"
-           "Good luck, space voyager! 🌟"
+    "tips": "💡 **Strategic Insights** 💡\n\n"
+           "🎮 **New Voyagers:** \n"
+           "- Guard your role\n"
+           "- Vote thoughtfully\n"
+           "- Manage resources\n"
+           "- Ally wisely\n\n"
+           "⚡ **Veteran Tactics:** \n"
+           "- Cure damage in 4 days\n"
+           "- Leverage relics/items\n"
+           "- Shield the bearer\n"
+           "- Track ship health\n\n"
+           "🏆 **Odds:** \n"
+           "Light: ~45% | Shadow: ~55%\n\n"
+           "Forge ahead, voyager! 🌟"
 }
 
 class Role(Enum):
